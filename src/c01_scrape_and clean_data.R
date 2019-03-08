@@ -61,11 +61,19 @@ save(gas_tbl_raw, gas_tbl, file = "data/canada_gas_tax.Rdata")
 
 
 
-# cities and provinces data
-cities_tbl <- fromJSON("data/cities/jprichardson/cities.json") %>%
+# cities, provinces and territories data
+cities_tbl <-
+    fromJSON("data/cities/jprichardson/cities.json") %>%
     as_tibble() %>%
     rename(city = V1,
-           province = V2)
+           state = V2)
+
+state_tbl <-
+    bind_rows(fromJSON("data/cities/jprichardson/provinces.json") %>%
+                  enframe(name = "state", value = "state_name") ,
+              fromJSON("data/cities/jprichardson/territories.json") %>%
+                  enframe(name = "state", value = "state_name")) %>%
+    unnest()
 
 # use string comparison algorithm by Jaro and Winkler to match city names with proper names
 matched_cities_tbl <-
@@ -94,9 +102,15 @@ matched_cities_tbl %>%
     filter(n > 1)
 
 # add matched city names to gasoline data
-gas_tbl %>%
+gas_tbl_clean <-
+    gas_tbl %>%
     select(yr, grade, market, data_clean) %>%
     unnest() %>%
     left_join(matched_cities_tbl, by = "city") %>%
-    select(yr, date, city_name, city, province, grade, market, price)
+    left_join(state_tbl, by = "state") %>%
+    select(yr, date, city_name, city, state, state_name, grade, market, price)
 
+# number of cities in gasoline data, by province/territory
+gas_tbl_clean %>%
+    count(state_name, city_name) %>%
+    count(state_name)
