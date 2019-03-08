@@ -13,7 +13,7 @@ ylst <- 2017
 gas_tbl_raw <-
     crossing(yr = yfst:ylst,
              grade = c("Unleaded", "Premium"),
-             market = c("Retail%20(Incl.%20Tax)", "Wholesale")) %>%
+             market = c("Retail%20(Incl.%20Tax)", "Retail%20(Excl.%20Tax)", "Wholesale")) %>%
     mutate(link = str_c("https://charting.kentgroupltd.com/WPPS/", grade, "/", market, "/WEEKLY/", yr, "/", grade, "_", market, "_WEEKLY_", yr, ".htm"),
            webpage = map(link, read_html),
            data = map(webpage, ~ .x %>% html_table() %>% purrr::pluck(1)))
@@ -57,7 +57,7 @@ gas_tbl <-
                                 mutate(value = parse_number(value)) %>%
                                 select(date, city = X1, price = value)))
 
-save(gas_tbl_raw, gas_tbl, file = "data/canada_gas_tax.Rdata")
+save(gas_tbl_raw, gas_tbl, file = "data/gas_tbl_raw.Rdata")
 
 
 
@@ -112,5 +112,18 @@ gas_tbl_clean <-
 
 # number of cities in gasoline data, by province/territory
 gas_tbl_clean %>%
-    count(state_name, city_name) %>%
-    count(state_name)
+    count(state, state_name, city_name) %>%
+    count(state, state_name) %>%
+    filter(state %in% c("BC", "AB", "SK", "MB"))
+
+gas_tbl_clean %>%
+    filter(state %in% c("BC", "AB", "SK", "MB")) %>%
+    count(state, city_name)
+
+gas_tbl_clean %>%
+    filter(state %in% c("BC", "AB", "SK", "MB")) %>%
+    filter(grade == "Premium") %>%
+    spread(market, price)
+
+
+write_csv(gas_tbl_clean, path = "data/gas_tbl_clean.csv")
