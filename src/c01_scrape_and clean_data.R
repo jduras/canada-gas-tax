@@ -2,6 +2,8 @@
 library(magrittr)
 library(tidyverse)
 library(rvest)
+library(jsonlite)
+library(RecordLinkage)
 
 # first and last year in sample
 yfst <- 2013
@@ -52,11 +54,49 @@ gas_tbl <-
                                 filter(!is.na(date)) %>%
                                 ungroup() %>%
                                 filter(!str_detect(X1, "DATE")) %>%
+                                mutate(value = parse_number(value)) %>%
                                 select(date, city = X1, price = value)))
 
 save(gas_tbl_raw, gas_tbl, file = "data/canada_gas_tax.Rdata")
 
+
+
+# cities and provinces data
+cities_tbl <- fromJSON("data/cities/jprichardson/cities.json") %>%
+    as_tibble() %>%
+    rename(city = V1,
+           province = V2)
+
+# use string comparison algorithm by Jaro and Winkler to match city names with proper names
+matched_cities_tbl <-
+    crossing(gas_tbl %>%
+                 select(yr, grade, market, data_clean) %>%
+                 unnest() %>%
+                 distinct(city),
+             cities_tbl %>%
+                 rename(city_name = city)) %>%
+    mutate(jw = jarowinkler(city, city_name)) %>%
+    group_by(city) %>%
+    arrange(city, desc(jw)) %>%
+    slice(1) %>%
+    ungroup()
+
+# check matches with imperfect fit (Jaro and Winkler similarity measure)
+matched_cities_tbl %>%
+    print(n = 100) %>%
+    filter(jw < 1) %>%
+    arrange(jw) %>%
+    print(n = 100)
+
+# cities with multiple different spellings in gasoline data
+matched_cities_tbl %>%
+    count(city_name) %>%
+    filter(n > 1)
+
+# add matched city names to gasoline data
 gas_tbl %>%
     select(yr, grade, market, data_clean) %>%
-    unnest() %$%
-    unique(city)
+    unnest() %>%
+    left_join(matched_cities_tbl, by = "city") %>%
+    select(yr, date, city_name, city, province, grade, market, price)
+
