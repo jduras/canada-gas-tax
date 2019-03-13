@@ -1,10 +1,4 @@
 
-library(magrittr)
-library(tidyverse)
-library(rvest)
-library(jsonlite)
-library(RecordLinkage)
-
 # first and last year in sample
 yfst <- 2013
 ylst <- 2017
@@ -57,8 +51,7 @@ gas_tbl <-
                                 mutate(value = parse_number(value)) %>%
                                 select(date, city = X1, price = value)))
 
-save(gas_tbl_raw, gas_tbl, file = "data/gas_tbl_raw.Rdata")
-
+save(gas_tbl_raw, gas_tbl, file = str_c(here(), "/data/gas_tbl_raw.Rdata"))
 
 
 # cities, provinces and territories data
@@ -125,5 +118,5 @@ gas_tbl_clean %>%
     filter(grade == "Premium") %>%
     spread(market, price)
 
+write_csv(gas_tbl_clean, path = str_c(here(), "/data/gas_tbl_clean.csv"))
 
-write_csv(gas_tbl_clean, path = "data/gas_tbl_clean.csv")
