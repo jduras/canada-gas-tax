@@ -1,35 +1,50 @@
 
 # first and last year in sample
 yfst <- 2013
-ylst <- 2017
+ylst <- 2018
 
 # scrape gasoline price data from https://charting.kentgroupltd.com/
-gas_tbl_raw <-
+gas_tbl_daily_raw <-
+    crossing(yr = yfst:ylst,
+             grade = c("Unleaded", "Premium"),
+             market = c("Retail%20(Incl.%20Tax)", "Retail%20(Excl.%20Tax)", "Wholesale")) %>%
+    mutate(link = str_c("https://charting.kentgroupltd.com/WPPS/", grade, "/", market, "/DAILY/", yr, "/", grade, "_", market, "_DAILY_", yr, ".htm"),
+           webpage = map(link, possibly(read_html, otherwise = NA)),
+           data = map(webpage, possibly(~html_table(.x) %>% purrr::pluck(1), otherwise = NA)))
+
+gas_tbl_daily_raw %>%
+    filter(!is.na(data))
+
+gas_tbl_weekly_raw <-
     crossing(yr = yfst:ylst,
              grade = c("Unleaded", "Premium"),
              market = c("Retail%20(Incl.%20Tax)", "Retail%20(Excl.%20Tax)", "Wholesale")) %>%
     mutate(link = str_c("https://charting.kentgroupltd.com/WPPS/", grade, "/", market, "/WEEKLY/", yr, "/", grade, "_", market, "_WEEKLY_", yr, ".htm"),
-           webpage = map(link, read_html),
-           data = map(webpage, ~ .x %>% html_table() %>% purrr::pluck(1)))
+           webpage = map(link, possibly(read_html, otherwise = NA)),
+           data = map(webpage, possibly(~html_table(.x) %>% purrr::pluck(1), otherwise = NA)))
 
 # inspect the gasoline price data
-gas_tbl_raw$data[[1]] %>%
+gas_tbl_weekly_raw$data[[1]] %>%
     glimpse()
 
-gas_tbl_raw$data[[1]] %>%
+gas_tbl_weekly_raw$data[[1]] %>%
     slice(-(1:2)) %>%
     glimpse()
 
-gas_tbl_raw$data[[1]] %>%
+gas_tbl_weekly_raw$data[[1]] %>%
     slice(-(1:2)) %>%
     as_tibble() %>%
     select(1:2) %>%
     tail(15)
 
 # tidy the gasoline price data
-gas_tbl <-
-    gas_tbl_raw %>%
-    mutate(data_clean = map(data, ~.x %>%
+gas_tbl_weekly <-
+    gas_tbl_weekly_raw %>%
+    filter(!is.na(data)) %>%
+    mutate(market = case_when(market == "Retail%20(Excl.%20Tax)" ~ "retail_exc_tax",
+                              market == "Retail%20(Incl.%20Tax)" ~ "retail_inc_tax",
+                              market == "Wholesale" ~ "wholesale"),
+            data_clean = map(data, ~.x %>%
                                 as_tibble() %>%
                                 slice(-(1:2)) %>%
                                 filter(!str_detect(X1, "\\([SVP]\\)")) %>%
@@ -51,7 +66,7 @@ gas_tbl <-
                                 mutate(value = parse_number(value)) %>%
                                 select(date, city = X1, price = value)))
 
-save(gas_tbl_raw, gas_tbl, file = str_c(here(), "/data/gas_tbl_raw.Rdata"))
+save(gas_tbl_weekly_raw, gas_tbl_weekly, file = str_c(here(), "/data/gas_tbl_weekly_raw.Rdata"))
 
 
 # cities, provinces and territories data
@@ -66,11 +81,12 @@ state_tbl <-
                   enframe(name = "state", value = "state_name") ,
               fromJSON("data/cities/jprichardson/territories.json") %>%
                   enframe(name = "state", value = "state_name")) %>%
-    unnest()
+    unnest() %>%
+    mutate(state_name = str_to_title(state_name))
 
 # use string comparison algorithm by Jaro and Winkler to match city names with proper names
 matched_cities_tbl <-
-    crossing(gas_tbl %>%
+    crossing(gas_tbl_weekly %>%
                  select(yr, grade, market, data_clean) %>%
                  unnest() %>%
                  distinct(city),
@@ -95,28 +111,39 @@ matched_cities_tbl %>%
     filter(n > 1)
 
 # add matched city names to gasoline data
-gas_tbl_clean <-
-    gas_tbl %>%
+gas_tbl_weekly_clean <-
+    gas_tbl_weekly %>%
     select(yr, grade, market, data_clean) %>%
     unnest() %>%
     left_join(matched_cities_tbl, by = "city") %>%
     left_join(state_tbl, by = "state") %>%
+    mutate(city = str_to_title(city),
+           city_name = str_to_title(city_name)) %>%
     select(yr, date, city_name, city, state, state_name, grade, market, price)
 
 # number of cities in gasoline data, by province/territory
-gas_tbl_clean %>%
+gas_tbl_weekly_clean %>%
     count(state, state_name, city_name) %>%
     count(state, state_name) %>%
     filter(state %in% c("BC", "AB", "SK", "MB"))
 
-gas_tbl_clean %>%
+gas_tbl_weekly_clean %>%
     filter(state %in% c("BC", "AB", "SK", "MB")) %>%
     count(state, city_name)
 
-gas_tbl_clean %>%
+write_csv(gas_tbl_weekly_clean, path = str_c(here(), "/data/gas_tbl_weekly_clean.csv"))
+# gas_tbl_weekly_clean <- read_csv(str_c(here(), "/data/gas_tbl_weekly_clean.csv"))
+
+
+gas_tbl_weekly_clean %>%
+    mutate(is_AB = state == "AB") %>%
+    ggplot(aes(x = date, y = price, group = city, col = is_AB)) +
+        geom_line(alpha = 0.3) +
+        scale_color_manual(values = c("gray50", "red")) +
+        facet_grid(grade ~ market)
+
+gas_tbl_weekly_clean %>%
     filter(state %in% c("BC", "AB", "SK", "MB")) %>%
-    filter(grade == "Premium") %>%
-    spread(market, price)
-
-write_csv(gas_tbl_clean, path = str_c(here(), "/data/gas_tbl_clean.csv"))
-
+    ggplot(aes(x = date, y = price, group = city, col = state)) +
+        geom_line(alpha = 0.5) +
+        facet_grid(grade ~ market)
