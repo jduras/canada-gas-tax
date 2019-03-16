@@ -1,10 +1,10 @@
 
 # scrape gasoline price data from https://charting.kentgroupltd.com/
 
-#### get daily data ####
+#### scrape daily data ####
 
 # available in html format until June 2017 and in xls format from June 2017 onward
-gas_daily_raw <-
+gas_daily_raw_html <-
     crossing(yr = yfst_daily:ylst_daily,
              grade = c("Unleaded", "Premium"),
              market = c("Retail%20(Incl.%20Tax)", "Retail%20(Excl.%20Tax)", "Wholesale")) %>%
@@ -12,42 +12,42 @@ gas_daily_raw <-
            webpage = map(link, ~read_html(RETRY("GET", url = .x))),
            data = map(webpage, ~html_table(.x) %>% purrr::pluck(1)))
 
-gas_daily_raw %>%
+gas_daily_raw_html %>%
     filter(map_lgl(data, is.null))
 
 
 
-#### get weekly gas data ####
+#### scrape weekly gas data ####
 
-# available in html format until June 2017 and in xls format from June 2017 onward
-gas_weekly_raw <-
-    crossing(yr = yfst_weekly:ylst_weekly,
+# available in html format until June 2017 and in xlsx format from January 2017 onward
+gas_weekly_raw_html <-
+    crossing(yr = yfst_weekly:2016,
              grade = c("Unleaded", "Premium"),
              market = c("Retail%20(Incl.%20Tax)", "Retail%20(Excl.%20Tax)", "Wholesale")) %>%
     mutate(link = str_c("https://charting.kentgroupltd.com/WPPS/", grade, "/", market, "/WEEKLY/", yr, "/", grade, "_", market, "_WEEKLY_", yr, ".htm"),
            webpage = map(link, ~read_html(RETRY("GET", url = .x))),
            data = map(webpage, ~html_table(.x) %>% purrr::pluck(1)))
 
-gas_weekly_raw %>%
+gas_weekly_raw_html %>%
     filter(map_lgl(data, is.null))
 
 # inspect the weekly gasoline price data
-gas_weekly_raw$data[[1]] %>%
+gas_weekly_raw_html$data[[1]] %>%
     glimpse()
 
-gas_weekly_raw$data[[1]] %>%
+gas_weekly_raw_html$data[[1]] %>%
     slice(-(1:2)) %>%
     glimpse()
 
-gas_weekly_raw$data[[1]] %>%
+gas_weekly_raw_html$data[[1]] %>%
     slice(-(1:2)) %>%
     as_tibble() %>%
     select(1:2) %>%
     tail(15)
 
 # tidy the weekly gasoline price data
-gas_weekly <-
-    gas_weekly_raw %>%
+gas_weekly_html <-
+    gas_weekly_raw_html %>%
     filter(!map_lgl(data, is.null)) %>%
     filter(yr >= 2010) %>%
     mutate(market = case_when(market == "Retail%20(Excl.%20Tax)" ~ "retail_exc_tax",
@@ -75,15 +75,47 @@ gas_weekly <-
                                 mutate(value = parse_number(value)) %>%
                                 select(date, city = X1, price = value)))
 
-save(gas_weekly_raw, gas_weekly, file = str_c(here(), "/data/tbl_gas_weekly_raw.Rdata"))
+# available in xlsx format from January 2017 onward
+gas_weekly_raw_xlsx <-
+    crossing(yr = 2017:2018,
+         grade = c("Unleaded", "Premium"),
+         market = c("Retail (Incl. Tax)", "Retail (Excl. Tax)", "Wholesale")) %>%
+    mutate(file_name = str_c(here(), "/data/gas/", grade, "_", market, "_WEEKLY_", yr, ".xlsx"),
+           data = map(file_name, read_xlsx, skip = 2))
 
+# inspect the weekly gasoline price data
+gas_weekly_raw_xlsx$data[[1]] %>%
+    glimpse()
 
-# 2017 weekly gas data from https://charting.kentgroupltd.com/
-gas_weekly_raw_2017 <-
-    str_c(here(), "/data/gas/Premium_Retail (Excl. Tax)_WEEKLY_2017.xlsx") %>%
-    read_xlsx()
-gas_weekly_raw_2017
+gas_weekly_raw_xlsx$data[[1]] %>%
+    select(1:2) %>%
+    tail(15)
 
+# tidy the weekly gasoline price data
+gas_weekly_xlsx <-
+    gas_weekly_raw_xlsx %>%
+    mutate(market = case_when(market == "Retail (Excl. Tax)" ~ "retail_exc_tax",
+                              market == "Retail (Incl. Tax)" ~ "retail_inc_tax",
+                              market == "Wholesale" ~ "wholesale"),
+           data_clean = map(data, ~.x %>%
+                                filter(!str_detect(X__1, "\\([SVP]\\)")) %>%
+                                filter(!str_detect(X__1, "S-Simple")) %>%
+                                filter(!is.na(X__1)) %>%
+                                gather(md, price, -X__1) %>%
+                                select(md, city = X__1, price)))
+
+# combine the data from html and xlsx sources
+gas_weekly <-
+    bind_rows(gas_weekly_html %>%
+                  select(yr, grade, market, data_clean) %>%
+                  unnest(),
+              gas_weekly_xlsx %>%
+                  select(yr, grade, market, data_clean) %>%
+                  unnest() %>%
+                  mutate(date = str_c(as.character(yr), "/", md) %>% as.Date(format = "%Y/%m/%d")) %>%
+                  select(yr, grade, market, date, city, price))
+
+save(gas_weekly_raw_html, gas_weekly_raw_xlsx, gas_weekly, file = str_c(here(), "/data/tbl_gas_weekly_raw.Rdata"))
 
 
 #### get cities, provinces and territories data ####
@@ -109,8 +141,6 @@ state <-
 # use string comparison algorithm by Jaro and Winkler to match city names with proper names
 matched_cities <-
     crossing(gas_weekly %>%
-                 select(yr, grade, market, data_clean) %>%
-                 unnest() %>%
                  distinct(city),
              cities %>%
                  rename(city_name = city)) %>%
@@ -135,8 +165,6 @@ matched_cities %>%
 # add matched city names to gasoline data
 gas_weekly_clean <-
     gas_weekly %>%
-    select(yr, grade, market, data_clean) %>%
-    unnest() %>%
     left_join(matched_cities, by = "city") %>%
     left_join(state, by = "state") %>%
     mutate(city = str_to_title(city),
