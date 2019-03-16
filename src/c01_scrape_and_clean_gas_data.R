@@ -1,33 +1,37 @@
 
 # scrape gasoline price data from https://charting.kentgroupltd.com/
 
-# weekly data available in html format until June 2017 and in xls format from June 2017 onward
+#### get daily data ####
+
+# available in html format until June 2017 and in xls format from June 2017 onward
 gas_daily_raw <-
     crossing(yr = yfst_daily:ylst_daily,
              grade = c("Unleaded", "Premium"),
              market = c("Retail%20(Incl.%20Tax)", "Retail%20(Excl.%20Tax)", "Wholesale")) %>%
     mutate(link = str_c("https://charting.kentgroupltd.com/WPPS/", grade, "/", market, "/DAILY/", yr, "/", grade, "_", market, "_DAILY_", yr, ".htm"),
-           webpage = map(link, possibly(read_html, otherwise = NA)),
-           data = map(webpage, possibly(~html_table(.x) %>% purrr::pluck(1), otherwise = NA)))
+           webpage = map(link, ~read_html(RETRY("GET", url = .x))),
+           data = map(webpage, ~html_table(.x) %>% purrr::pluck(1)))
 
 gas_daily_raw %>%
-    filter(is.na(data))
+    filter(map_lgl(data, is.null))
 
 
 
-# weekly data available in html format until June 2017 and in xls format from June 2017 onward
+#### get weekly gas data ####
+
+# available in html format until June 2017 and in xls format from June 2017 onward
 gas_weekly_raw <-
     crossing(yr = yfst_weekly:ylst_weekly,
              grade = c("Unleaded", "Premium"),
              market = c("Retail%20(Incl.%20Tax)", "Retail%20(Excl.%20Tax)", "Wholesale")) %>%
     mutate(link = str_c("https://charting.kentgroupltd.com/WPPS/", grade, "/", market, "/WEEKLY/", yr, "/", grade, "_", market, "_WEEKLY_", yr, ".htm"),
-           webpage = map(link, possibly(read_html, otherwise = NA)),
-           data = map(webpage, possibly(~html_table(.x) %>% purrr::pluck(1), otherwise = NA)))
+           webpage = map(link, ~read_html(RETRY("GET", url = .x))),
+           data = map(webpage, ~html_table(.x) %>% purrr::pluck(1)))
 
 gas_weekly_raw %>%
-    filter(is.na(data))
+    filter(map_lgl(data, is.null))
 
-# inspect the gasoline price data
+# inspect the weekly gasoline price data
 gas_weekly_raw$data[[1]] %>%
     glimpse()
 
@@ -41,10 +45,10 @@ gas_weekly_raw$data[[1]] %>%
     select(1:2) %>%
     tail(15)
 
-# tidy the gasoline price data
+# tidy the weekly gasoline price data
 gas_weekly <-
     gas_weekly_raw %>%
-    filter(!is.na(data)) %>%
+    filter(!map_lgl(data, is.null)) %>%
     filter(yr >= 2010) %>%
     mutate(market = case_when(market == "Retail%20(Excl.%20Tax)" ~ "retail_exc_tax",
                               market == "Retail%20(Incl.%20Tax)" ~ "retail_inc_tax",
@@ -74,7 +78,7 @@ gas_weekly <-
 save(gas_weekly_raw, gas_weekly, file = str_c(here(), "/data/tbl_gas_weekly_raw.Rdata"))
 
 
-# 2017 gas data from https://charting.kentgroupltd.com/
+# 2017 weekly gas data from https://charting.kentgroupltd.com/
 gas_weekly_raw_2017 <-
     str_c(here(), "/data/gas/Premium_Retail (Excl. Tax)_WEEKLY_2017.xlsx") %>%
     read_xlsx()
@@ -82,7 +86,8 @@ gas_weekly_raw_2017
 
 
 
-# cities, provinces and territories data
+#### get cities, provinces and territories data ####
+
 cities <-
     fromJSON("data/cities/jprichardson/cities.json") %>%
     as_tibble() %>%
@@ -96,6 +101,10 @@ state <-
                   enframe(name = "state", value = "state_name")) %>%
     unnest() %>%
     mutate(state_name = str_to_title(state_name))
+
+
+
+#### clean up city names ####
 
 # use string comparison algorithm by Jaro and Winkler to match city names with proper names
 matched_cities <-
@@ -136,9 +145,9 @@ gas_weekly_clean <-
 
 # number of cities in gasoline data, by province/territory
 gas_weekly_clean %>%
+    filter(state %in% c("BC", "AB", "SK", "MB")) %>%
     count(state, state_name, city_name) %>%
-    count(state, state_name) %>%
-    filter(state %in% c("BC", "AB", "SK", "MB"))
+    count(state, state_name)
 
 gas_weekly_clean %>%
     filter(state %in% c("BC", "AB", "SK", "MB")) %>%
@@ -146,6 +155,10 @@ gas_weekly_clean %>%
 
 write_csv(gas_weekly_clean, path = str_c(here(), "/data/tbl_gas_weekly_clean.csv"))
 # gas_weekly_clean <- read_csv(str_c(here(), "/data/tbl_gas_weekly_clean.csv"))
+
+
+
+#### plots ####
 
 # plot prices as time series
 gas_weekly_clean %>%
