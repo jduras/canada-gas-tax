@@ -1,5 +1,7 @@
 
 # scrape tax data from https://charting.kentgroupltd.com/
+
+#### 2016 tax data ####
 tax_2016_raw <-
     "https://charting.kentgroupltd.com/WPPS/Taxation/Taxation%20Tables/HISTORICAL%20TAXATION/2016/Taxation_Taxation%20Tables_HISTORICAL%20TAXATION_2016.htm" %>%
     read_html() %>%
@@ -53,7 +55,8 @@ tax_2016_clean %>%
 write_csv(tax_2016_clean, path = str_c(here(), "/data/tbl_tax_2016_clean.csv"))
 
 
-# 2019 tax data from https://charting.kentgroupltd.com/
+#### 2019 tax data ####
+
 tax_raw <-
     str_c(here(), "/data/taxes/Taxation_Taxation Tables_HISTORICAL TAXATION_2019.csv") %>%
     read_csv(col_names = FALSE)

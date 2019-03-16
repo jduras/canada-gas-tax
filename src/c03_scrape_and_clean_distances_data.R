@@ -1,6 +1,8 @@
 
 gas_weekly_clean <- read_csv(str_c(here(), "/data/tbl_gas_weekly_clean.csv"))
 
+#### scrape distance data ####
+
 # perform request to the Google Maps Distance Matrix API to obtain distances between cities with missing wholesale gas price
 cities_distances_raw <-
     gas_weekly_clean %>%
@@ -27,4 +29,5 @@ cities_distances_clean <-
     select(city_name_origin = city_name, state_origin, city_name_destination = city_name1, state_destination, distance)
 
 save(cities_distances_raw, cities_distances_clean, file = str_c(here(), "/data/tbl_cities_distances_raw.Rdata"))
+
 write_csv(cities_distances_clean, path = str_c(here(), "/data/tbl_distance_clean.csv"))
